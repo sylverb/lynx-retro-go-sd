@@ -1,117 +1,87 @@
-# Retro-Go SD template — one project = one CORE or one GWHB homebrew.
+# Retro-Go SD — Atari Lynx (Handy / handy-go) standalone dynamic core.
 #
-#   make                  — build + pack (default: PROJECT_KIND=core)
-#   make PROJECT_KIND=homebrew
-#   make docker           — same build inside Docker (no host toolchain)
-#   make docker_shell     — interactive shell in the builder image
+#   make                  — build + pack → lynx.bin
+#   make docker           — same inside the firmware builder image
 #
-# Customize CORE_NAME / pack metadata below, then replace src/main.c.
-# Verbose compiler lines: make V=
+# Memory: hot Handy .text (system/mikie/susie) in ITCM; 64K WRAM + frame/
+# audio scratch in DTCM; cart ROM banks in RAM_EMU / XIP. ITCM is not used
+# for heap data.
 
 #######################################
 # Project identity
 #######################################
-# core     → pack_core.py     → /cores/<name>.bin
-# homebrew → pack_homebrew.py → /homebrews/<name>.bin
 PROJECT_KIND ?= core
 
-CORE_NAME  := example
-CORE_ENTRY := app_main
+CORE_NAME  := lynx
+CORE_ENTRY := app_main_lynx
 
-CORE_C_SOURCES := \
-src/main.c
+CORE_HANDY := external/handy-go
 
-# Relative path so Docker bind-mounts work (do NOT use $(abspath) — it
-# bakes the host path into Make prerequisites / .d files). Do not name
-# this SDK_ROOT: that env var is commonly set by Android SDK installs.
+CORE_CXX_SOURCES := \
+$(CORE_HANDY)/cart.cpp \
+$(CORE_HANDY)/eeprom.cpp \
+$(CORE_HANDY)/lynxdec.cpp \
+$(CORE_HANDY)/mikie.cpp \
+$(CORE_HANDY)/susie.cpp \
+$(CORE_HANDY)/system.cpp \
+src/main_lynx.cpp
+
+CORE_C_SOURCES :=
+
+CORE_C_INCLUDES := \
+-I$(CORE_HANDY)
+
+# TARGET_GNW: handy-go G&W paths (log_printf, LSS_FILE→FILE, wdog in UpdateFrame)
+CORE_LDSCRIPT := lynx_core.ld
+CORE_EXTRA_SEGMENTS := itcm:core_itcm
+
 GNW_CORE_SDK ?= sdk
-# Separate build trees so switching PROJECT_KIND does not reuse stale .o.
 BUILD_DIR ?= build/$(PROJECT_KIND)
 
 #######################################
 # Kind-specific compile defs + packing
 #######################################
 ifeq ($(PROJECT_KIND),core)
-# Match release-firmware layout of retro_emulator_file_t: COVERFLOW fields
-# sit before cheat_* — CHEAT_CODES alone with COVERFLOW=0 misaligns pointers.
-# MAX_CHEAT_CODES mirrors Makefile.common's release default.
 CORE_C_DEFS := \
 -DPROJECT_KIND_CORE=1 \
 -DCOVERFLOW=1 \
--DCHEAT_CODES=1 \
--DMAX_CHEAT_CODES=13
+-DCHEAT_CODES=0 \
+-DTARGET_GNW
 
 PACKED_BIN  := $(CORE_NAME).bin
-PAD_LOGO    := src/assets/pad.png
-HEADER_LOGO := src/assets/header.png
+PAD_LOGO    := src/assets/pad.bmp
+HEADER_LOGO := src/assets/header.bmp
 
 else ifeq ($(PROJECT_KIND),homebrew)
-CORE_C_DEFS := \
--DPROJECT_KIND_HOMEBREW=1
-
-PACKED_BIN := ExampleHB.bin
-COVER_JPG  := $(BUILD_DIR)/cover.jpg
-
+$(error Lynx is a dynamic core only — use PROJECT_KIND=core)
 else
-$(error PROJECT_KIND must be 'core' or 'homebrew' (got '$(PROJECT_KIND)'))
+$(error PROJECT_KIND must be 'core' (got '$(PROJECT_KIND)'))
 endif
 
 include $(GNW_CORE_SDK)/Makefile
 
-PACK_CORE     := $(GNW_CORE_SDK)/tools/pack_core.py
-PACK_HOMEBREW := $(GNW_CORE_SDK)/tools/pack_homebrew.py
+PACK_CORE := $(GNW_CORE_SDK)/tools/pack_core.py
 
 #######################################
 # Pack
 #######################################
-.PHONY: pack cover
-
-ifeq ($(PROJECT_KIND),core)
+.PHONY: pack
 
 pack: $(TARGET_BIN) $(PAD_LOGO) $(HEADER_LOGO)
 	$(V)$(ECHO) [ PACK CORE ] $(PACKED_BIN)
 	$(V)python3 $(PACK_CORE) \
 		--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
-		--system-name "Example Core" --dirname example \
-		--extensions "bin" \
-		--core-name "Example" \
+		--system-name "Atari Lynx" --dirname lynx \
+		--extensions "lnx lyx" \
+		--core-name "Handy" \
 		--version 1.0.0 \
-		--cheat-ext ggcodes \
 		--pad-logo $(PAD_LOGO) \
 		--header-logo $(HEADER_LOGO) \
+		--logo-invert \
 		--out $(PACKED_BIN)
-
-else
-
-.PHONY: cover
-cover: $(COVER_JPG)
-
-# Must fit gui.c COVER_MAX_WIDTH x COVER_MAX_HEIGHT (186x100) and
-# COVER_SIZE (10 KiB) — oversized covers smash the HW JPEG scratch.
-$(COVER_JPG):
-	@mkdir -p $(BUILD_DIR)
-	python3 -c "from pathlib import Path; from PIL import Image, ImageDraw, ImageFont; \
-img=Image.new('RGB', (186,100), (32,48,96)); \
-d=ImageDraw.Draw(img); \
-d.rectangle((8,8,177,91), outline=(220,220,255), width=2); \
-d.text((20,38), 'Example HB', fill=(255,255,255)); \
-img.save('$(COVER_JPG)', 'JPEG', quality=85, optimize=True); \
-sz=Path('$(COVER_JPG)').stat().st_size; \
-assert sz <= 10*1024, f'cover too big: {sz}'"
-
-pack: $(TARGET_BIN) $(COVER_JPG)
-	$(V)$(ECHO) [ PACK GWHB ] $(PACKED_BIN)
-	$(V)python3 $(PACK_HOMEBREW) \
-		--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
-		--name "Example Homebrew" --version 1.0.0 \
-		--cover $(COVER_JPG) \
-		--out $(PACKED_BIN)
-
-endif
 
 all: pack
 
-# Read-only helpers for CI / scripts (make print-PROJECT_KIND, etc.).
 .PHONY: print-PROJECT_KIND print-PACKED_BIN print-CORE_NAME print-DOCKER_IMAGE
 print-PROJECT_KIND:
 	@echo $(PROJECT_KIND)
@@ -124,12 +94,9 @@ print-DOCKER_IMAGE:
 
 clean::
 	$(V)rm -f $(PACKED_BIN)
-ifeq ($(PROJECT_KIND),homebrew)
-	$(V)rm -f $(COVER_JPG)
-endif
 
 #######################################
-# Docker (same image as firmware repo)
+# Docker
 #######################################
 .PHONY: docker docker_pull docker_shell
 
@@ -138,7 +105,6 @@ DOCKER_REPOSITORY ?= sylverb/retro-go-sd-builder
 DOCKER_IMAGE ?= $(DOCKER_REPOSITORY):$(RELEASE_VERSION)
 
 DOCKER_TTY_FLAG := $(shell if [ -t 0 ]; then echo -it; else echo; fi)
-# Host UID so build/ artifacts are not root-owned on the bind mount.
 DOCKER_USER := $(shell id -u):$(shell id -g)
 DOCKER_RUN := docker run --rm $(DOCKER_TTY_FLAG) \
 	--user $(DOCKER_USER) \
@@ -146,8 +112,6 @@ DOCKER_RUN := docker run --rm $(DOCKER_TTY_FLAG) \
 	-w /opt/workdir \
 	$(DOCKER_IMAGE)
 
-# Compile inside the published builder image (uses the local copy).
-# Refresh with `make docker_pull` when you want a newer digest for the tag.
 docker:
 	$(V)$(ECHO) "[ DOCKER ]" $(DOCKER_IMAGE) "PROJECT_KIND=$(PROJECT_KIND)"
 	$(V)$(DOCKER_RUN) make --no-print-directory -j$$(nproc) PROJECT_KIND=$(PROJECT_KIND)
@@ -156,6 +120,5 @@ docker_pull:
 	$(V)$(ECHO) "[ PULL ]" $(DOCKER_IMAGE)
 	$(V)docker pull $(DOCKER_IMAGE)
 
-# Interactive shell with the same image / mount as `make docker`.
 docker_shell:
 	$(DOCKER_RUN) bash
