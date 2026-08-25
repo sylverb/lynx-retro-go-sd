@@ -1,0 +1,145 @@
+# Host (Linux/macOS) SDL build — included from the project Makefile.
+#
+#   make host                     # SDL2, same PROJECT_KIND as device build
+#   make host HOST_SDL=3          # SDL3
+#   ./lynx_host [rom.lnx]         # optional ROM path (cores); or HOST_ROM=…
+#
+# C-only cores: src/main.c + host/host_main.c
+# C++ cores (Lynx): CORE_CXX_SOURCES + host/host_main.cpp
+#
+# Requires: pkg-config + libsdl2-dev / sdl2 (or sdl3).
+
+HOST_SDL   ?= 2
+HOST_SCALE ?= 2
+HOST_CC    ?= cc
+HOST_CXX   ?= c++
+
+HOST_BUILD_DIR := build/host/$(PROJECT_KIND)_sdl$(HOST_SDL)
+
+ifeq ($(PROJECT_KIND),homebrew)
+HOST_BIN := ExampleHB_host
+else
+HOST_BIN := $(CORE_NAME)_host
+endif
+
+ifeq ($(HOST_SDL),3)
+HOST_SDL_PC := sdl3
+else ifeq ($(HOST_SDL),2)
+HOST_SDL_PC := sdl2
+else
+$(error HOST_SDL must be 2 or 3 (got '$(HOST_SDL)'))
+endif
+
+# devkitPro's pkg-config often shadows Homebrew/macOS SDL .pc files.
+HOST_BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
+ifneq ($(HOST_BREW_PREFIX),)
+export PKG_CONFIG_PATH := $(HOST_BREW_PREFIX)/lib/pkgconfig:$(PKG_CONFIG_PATH)
+endif
+
+HOST_PKG_CFLAGS := $(shell pkg-config --cflags $(HOST_SDL_PC) 2>/dev/null)
+HOST_PKG_LIBS   := $(shell pkg-config --libs $(HOST_SDL_PC) 2>/dev/null)
+HOST_PKG_LIBS   := $(filter-out -lSDL2main,$(HOST_PKG_LIBS))
+ifeq ($(HOST_PKG_LIBS),)
+ifneq ($(HOST_BREW_PREFIX),)
+HOST_PKG_CFLAGS := -I$(HOST_BREW_PREFIX)/include/SDL2 -DSDL_MAIN_HANDLED
+HOST_PKG_LIBS   := -L$(HOST_BREW_PREFIX)/lib -lSDL2
+else
+$(warning pkg-config $(HOST_SDL_PC) not found — host link may fail. Install SDL$(HOST_SDL) devel package.)
+endif
+endif
+
+HOST_INC_ROOT := $(GNW_CORE_SDK)/include
+
+# Device-only flags (TARGET_GNW / rg_system) are omitted on host.
+HOST_DEFS := \
+	-DHOST_BUILD=1 \
+	-DHOST_SDL=$(HOST_SDL) \
+	-DHOST_SCALE=$(HOST_SCALE) \
+	-DSDL_MAIN_HANDLED=1 \
+	-DIS_LITTLE_ENDIAN \
+	-DGNW_DISABLE_COMPRESSION \
+	-DPROJECT_KIND_CORE=1 \
+	-DCOVERFLOW=1 \
+	-DCHEAT_CODES=0
+
+HOST_INCLUDES := \
+	-Ihost \
+	-Ihost/stubs \
+	-I$(GNW_CORE_SDK)/src \
+	-I$(HOST_INC_ROOT)/Core/Inc \
+	-I$(HOST_INC_ROOT)/Core/Inc/retro-go \
+	-I$(HOST_INC_ROOT)/Core/Inc/porting \
+	-I$(HOST_INC_ROOT)/Core/Src/porting/lib \
+	-I$(HOST_INC_ROOT)/Core/Src/porting/lib/FatFs \
+	-I$(HOST_INC_ROOT)/retro-go-stm32/components/odroid \
+	$(CORE_C_INCLUDES) \
+	$(HOST_PKG_CFLAGS)
+
+HOST_CFLAGS := -O2 -g -Wall -Wextra -std=c11 \
+	-include host/stubs/config.h \
+	$(HOST_DEFS) $(HOST_INCLUDES)
+
+HOST_CXXFLAGS := -O2 -g -Wall -Wextra -std=c++17 -fno-exceptions -fno-rtti \
+	-include host/stubs/config.h \
+	$(HOST_DEFS) $(HOST_INCLUDES)
+
+HOST_C_SRCS := \
+	$(CORE_C_SOURCES) \
+	host/host_platform.c \
+	host/host_emu.c \
+	host/host_i18n.c
+
+ifneq ($(strip $(CORE_CXX_SOURCES)),)
+HOST_USE_CXX := 1
+HOST_CXX_SRCS := $(CORE_CXX_SOURCES)
+HOST_ENTRY_SRC := host/host_main.cpp
+HOST_ENTRY_OBJ := $(HOST_BUILD_DIR)/host/host_main_host.o
+HOST_LINK := $(HOST_CXX)
+HOST_LIBS_EXTRA := -lstdc++
+else
+HOST_C_SRCS += host/host_main.c
+HOST_CXX_SRCS :=
+HOST_ENTRY_SRC :=
+HOST_ENTRY_OBJ :=
+HOST_LINK := $(HOST_CC)
+HOST_LIBS_EXTRA :=
+endif
+
+HOST_C_OBJS   := $(addprefix $(HOST_BUILD_DIR)/,$(HOST_C_SRCS:.c=.o))
+HOST_CXX_OBJS := $(addprefix $(HOST_BUILD_DIR)/,$(HOST_CXX_SRCS:.cpp=.o))
+HOST_OBJS     := $(HOST_C_OBJS) $(HOST_CXX_OBJS) $(HOST_ENTRY_OBJ)
+HOST_DEPS     := $(HOST_OBJS:.o=.d)
+
+.PHONY: host host_clean
+
+host: $(HOST_BIN)
+	$(V)$(ECHO) "[ HOST ]" $(HOST_BIN) "(SDL$(HOST_SDL), PROJECT_KIND=$(PROJECT_KIND))"
+
+$(HOST_BIN): $(HOST_OBJS)
+	$(V)$(ECHO) [ LD HOST ] $@
+	$(V)$(HOST_LINK) -o $@ $(HOST_OBJS) $(HOST_PKG_LIBS) $(HOST_LIBS_EXTRA)
+
+$(HOST_BUILD_DIR)/%.o: %.c
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CC HOST ] $<
+	$(V)$(HOST_CC) $(HOST_CFLAGS) -MMD -MP -MF"$(@:%.o=%.d)" -c $< -o $@
+
+$(HOST_BUILD_DIR)/%.o: %.cpp
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CXX HOST ] $<
+	$(V)$(HOST_CXX) $(HOST_CXXFLAGS) -MMD -MP -MF"$(@:%.o=%.d)" -c $< -o $@
+
+ifneq ($(HOST_USE_CXX),)
+$(HOST_ENTRY_OBJ): $(HOST_ENTRY_SRC)
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CXX HOST ] $<
+	$(V)$(HOST_CXX) $(HOST_CXXFLAGS) -MMD -MP -MF"$(@:%.o=%.d)" -c $< -o $@
+endif
+
+host_clean:
+	$(V)rm -rf build/host
+	$(V)rm -f $(CORE_NAME)_host ExampleHB_host
+
+clean:: host_clean
+
+-include $(HOST_DEPS)

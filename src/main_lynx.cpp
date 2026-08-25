@@ -12,14 +12,17 @@ extern "C"
 #include "common.h"
 #include "rom_manager.h"
 #include "odroid_overlay.h"
+#include "appid.h"
 
+#ifdef HOST_BUILD
+#include "host_compat.h"
+#else
 #include "gw_core_bridge.h"
+#endif
 }
 
 #include "heap.hpp"
 #include <handy.h>
-
-#define APPID_LYNX              20
 #define LYNX_FPS                60
 #define AUDIO_LYNX_SAMPLE_RATE  HANDY_AUDIO_SAMPLE_FREQ /* 32000 */
 
@@ -186,13 +189,6 @@ extern "C" void app_main_lynx(uint8_t load_state, uint8_t start_paused, int8_t s
     uint32_t rom_length = 0;
     uint8_t *rom_ptr = NULL;
 
-    gw_core_bridge_init();
-    ram_start = (uint32_t)(uintptr_t)&__CORE_BSS_END__;
-    dtc_init();
-
-    /* ITCM is for packed hot code only — never route operator new there. */
-    heap_itc_alloc(false);
-
     common_emu_state.pause_after_frames = start_paused ? 2 : 0;
 
     rom_length = getromdata(&rom_ptr);
@@ -225,7 +221,7 @@ extern "C" void app_main_lynx(uint8_t load_state, uint8_t start_paused, int8_t s
     common_emu_state.frame_time_10us = (uint16_t)(100000 / LYNX_FPS + 0.5f);
     lcd_set_refresh_rate(LYNX_FPS);
 
-    odroid_system_init(APPID_LYNX, AUDIO_LYNX_SAMPLE_RATE);
+    odroid_system_init(APPID_CORE, AUDIO_LYNX_SAMPLE_RATE);
     odroid_system_emu_init(&LoadState, &SaveState, &Screenshot, NULL, NULL, NULL, NULL);
 
     bool pending_resume = load_state;

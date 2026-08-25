@@ -39,7 +39,9 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdio>
+#ifndef HOST_BUILD
 #include <sys/reent.h>
+#endif
 
 extern "C" {
 #include "gw_malloc.h"

@@ -70,6 +70,7 @@ vfprintf core_vfprintf
 sprintf core_sprintf
 vsprintf core_vsprintf
 snprintf core_snprintf
+vsnprintf core_vsnprintf
 exit core_exit
 # --- libc: assert.h ---
 __assert_func core_assert_func
@@ -92,6 +93,9 @@ lcd_clear_buffers core_lcd_clear_buffers
 lcd_sync core_lcd_sync
 lcd_clone core_lcd_clone
 lcd_sleep_while_swap_pending core_lcd_sleep_while_swap_pending
+lcd_setup_framebuffers core_lcd_setup_framebuffers
+lcd_get_bonus_pool core_lcd_get_bonus_pool
+lcd_set_clut core_lcd_set_clut
 # --- G&W hardware: audio ---
 audio_start_playing core_audio_start_playing
 audio_get_active_buffer core_audio_get_active_buffer
@@ -126,6 +130,8 @@ odroid_system_emu_init core_odroid_system_emu_init
 odroid_system_emu_load_state core_odroid_system_emu_load_state
 odroid_system_get_app core_odroid_system_get_app
 dma2d_m2m_rgb565_start core_dma2d_m2m_rgb565_start
+dma2d_m2m_rgb565_start_ex core_dma2d_m2m_rgb565_start_ex
+dma2d_r2m_rgb565_start core_dma2d_r2m_rgb565_start
 dma2d_poll core_dma2d_poll
 odroid_audio_mute core_odroid_audio_mute
 # --- retro-go: input / display ---
@@ -223,7 +229,6 @@ common_emu_frame_loop_reset core_common_emu_frame_loop_reset
 get_SystemCoreClock core_get_SystemCoreClock
 odroid_overlay_cache_file_in_flash_relocate core_odroid_overlay_cache_file_in_flash_relocate
 lcd_backlight_set core_lcd_backlight_set
-draw_error_screen core_draw_error_screen
 # --- Battery (BQ24072 via odroid_input) ---
 odroid_input_read_battery core_odroid_input_read_battery
 # --- Music / media homebrew (PCM ISR + UI chrome) ---
